@@ -1,4 +1,4 @@
-import Observable from 'zen-observable-ts';
+import Observable, { ZenObservable } from 'zen-observable-ts';
 import { ConsoleLogger as Logger } from '../Logger';
 
 const logger = new Logger('Reachability', 'DEBUG');
@@ -8,6 +8,10 @@ type NetworkStatus = {
 };
 
 export default class ReachabilityNavigator implements Reachability {
+	private static _observers: Array<
+		ZenObservable.SubscriptionObserver<NetworkStatus>
+	> = [];
+
 	networkMonitor(netInfo?: any): Observable<NetworkStatus> {
 		/**
 		 * Here netinfo refers to @react-native-community/netinfo
@@ -46,12 +50,30 @@ export default class ReachabilityNavigator implements Reachability {
 				}
 			}, 2000);
 
+			ReachabilityNavigator._observers.push(observer);
+
 			return () => {
 				logger.log('unsubscribing reachability');
 
 				clearInterval(id);
+
+				ReachabilityNavigator._observers = ReachabilityNavigator._observers.filter(
+					_observer => _observer !== observer
+				);
 			};
 		});
+	}
+	// expose observers to simulate offline mode for integration testing
+	private static _observerOverride(status: NetworkStatus): void {
+		for (const observer of ReachabilityNavigator._observers) {
+			if (observer.closed) {
+				ReachabilityNavigator._observers = ReachabilityNavigator._observers.filter(
+					_observer => _observer !== observer
+				);
+				continue;
+			}
+			observer.next(status);
+		}
 	}
 }
 
