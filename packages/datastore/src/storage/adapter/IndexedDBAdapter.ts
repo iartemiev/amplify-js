@@ -695,7 +695,7 @@ class IndexedDBAdapter implements Adapter {
 		deleteQueue: { storeName: string; items: T[] }[]
 	): Promise<void> {
 		for await (const rel of relations) {
-			const { relationType, fieldName, modelName } = rel;
+			const { relationType, fieldName, modelName, associatedWith } = rel;
 			const storeName = this.getStorename(nameSpace, modelName);
 
 			const index: string =
@@ -709,7 +709,7 @@ class IndexedDBAdapter implements Adapter {
 				// associatedWith property
 				getIndexFromAssociation(
 					this.schema.namespaces[nameSpace].relationships[modelName].indexes,
-					rel.associatedWith
+					associatedWith
 				);
 
 			switch (relationType) {
@@ -718,8 +718,8 @@ class IndexedDBAdapter implements Adapter {
 						const recordToDelete = <T>await this.db
 							.transaction(storeName, 'readwrite')
 							.objectStore(storeName)
-							.index(index)
-							.get(model.id);
+							.index('byId')
+							.get(model[associatedWith]);
 
 						await this.deleteTraverse(
 							this.schema.namespaces[nameSpace].relationships[modelName]
