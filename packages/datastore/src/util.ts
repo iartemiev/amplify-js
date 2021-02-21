@@ -440,7 +440,10 @@ export function objectsEqual(objA: object, objB: object): boolean {
 	let a = objA;
 	let b = objB;
 
-	if (Array.isArray(a) && !Array.isArray(b)) {
+	if (
+		(Array.isArray(a) && !Array.isArray(b)) ||
+		(Array.isArray(b) && !Array.isArray(a))
+	) {
 		return false;
 	}
 
