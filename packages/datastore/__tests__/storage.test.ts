@@ -245,7 +245,6 @@ describe('Storage tests', () => {
 					expectedValueMetadata
 				);
 			});
-
 			test('custom type unchanged', async () => {
 				const classes = initSchema(testSchema());
 
