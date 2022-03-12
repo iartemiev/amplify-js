@@ -383,9 +383,15 @@ export class AWSAppSyncRealTimeProvider extends AbstractPubSubProvider {
 	}
 
 	private _handleIncomingSubscriptionMessage(message: MessageEvent) {
-		logger.debug(
-			`subscription message from AWS AppSync RealTime: ${message.data}`
-		);
+		if (message.data && message.data === '{"type":"ka"}') {
+			logger.verbose(
+				`subscription message from AWS AppSync RealTime: ${message.data}`
+			);
+		} else {
+			logger.debug(
+				`subscription message from AWS AppSync RealTime: ${message.data}`
+			);
+		}
 		const { id = '', payload, type } = JSON.parse(message.data);
 		const {
 			observer = null,
