@@ -13,11 +13,14 @@ const TRUNCATE_MAX_LENGTH = 5000;
 export const cloudWatchEventFromGeneric = (
 	event: GenericLogEvent
 ): InputLogEvent => {
-	const { timestamp, ...message } = event;
+	const {
+		context: { logTime: timestamp },
+		...message
+	} = event;
 
 	return {
 		timestamp,
-		message: JSON.stringify(message),
+		message: JSON.stringify(event),
 	};
 };
 

@@ -1,23 +1,19 @@
-import { InputLogEvent } from '@aws-sdk/client-cloudwatch-logs';
 import { ConsoleLogger as Logger, LOG_LEVELS, LOG_TYPE } from '../../Logger';
 import LoggerConnectivity from './loggerConnectivity';
 import {
-	EVENT_FORMAT,
 	LoggingProvider,
 	GenericLogEvent,
 	APILoggingProviderOptions,
+	isLoggerEvent,
 } from '../../types/types';
 import { jitteredExponentialRetry, NonRetryableError } from '../../../';
-import {
-	cloudWatchEventFromGeneric,
-	cloudWatchLogEventBatch,
-} from './CloudWatchEventFormatter';
 import { postOptions } from './Fetch';
 import {
 	API_LOGGING_PROVIDER_NAME,
 	API_LOGGING_PROVIDER_CATEGORY,
 } from '../../Util/Constants';
 import { getStringByteSize } from '../../Util/StringUtils';
+import { InputLogEvent } from '@aws-sdk/client-cloudwatch-logs';
 
 const logger = new Logger('APILoggingProvider');
 const HTTPS = 'https';
@@ -44,7 +40,7 @@ class APILoggingProvider implements LoggingProvider {
 	private connectivity: LoggerConnectivity;
 	private online: boolean = false;
 	private bufferInterval: ReturnType<typeof setInterval>;
-	private eventBuffer: GenericLogEvent[] | InputLogEvent[] = [];
+	private eventBuffer: GenericLogEvent[] = [];
 
 	constructor(config?: APILoggingProviderOptions) {
 		this.configure(config);
@@ -77,25 +73,48 @@ class APILoggingProvider implements LoggingProvider {
 		}
 	}
 
-	public pushLog(event: GenericLogEvent): void {
+	public pushLogs(events: InputLogEvent[]): void {
 		if (this.config?.enabled === false) {
 			return;
 		}
 
-		if (!this.verifyEvent(event)) {
-			return;
-		}
+		events.forEach(event => {
+			if (!isLoggerEvent(event)) {
+				return;
+			}
 
-		switch (this.config.eventFormat) {
-			case EVENT_FORMAT.CLOUDWATCH:
-				const cloudWatchEvent = cloudWatchEventFromGeneric(event);
-				(this.eventBuffer as InputLogEvent[]).push(cloudWatchEvent);
-				break;
-			case EVENT_FORMAT.GENERIC:
-			default:
-				(this.eventBuffer as GenericLogEvent[]).push(event);
-				break;
-		}
+			const {
+				message,
+				timestamp,
+				loggerInfo: {
+					level,
+					data,
+					name,
+					error: { message: errorMessage, name: errorName } = {},
+				},
+			} = event;
+
+			const error = errorName &&
+				errorMessage && {
+					errorMessage,
+					errorName,
+				};
+
+			const combinedEvent: GenericLogEvent = {
+				level,
+				error,
+				message,
+				context: {
+					category: name,
+					data: { ...data, ...this.config.metadata },
+					logTime: timestamp,
+				},
+			};
+
+			if (this.verifyEvent(combinedEvent)) {
+				this.eventBuffer.push(combinedEvent);
+			}
+		});
 	}
 
 	private validateConfig(config: APILoggingProviderOptions): void {
@@ -126,7 +145,6 @@ class APILoggingProvider implements LoggingProvider {
 			metadata: config.metadata,
 			enabled: config.enabled ?? true,
 			level: config.level ?? LOG_TYPE.WARN,
-			eventFormat: config.eventFormat ?? EVENT_FORMAT.CLOUDWATCH,
 			bufferInterval: config.bufferInterval ?? DEFAULT_INTERVAL,
 			excludeClassList:
 				config.excludeClassList instanceof Array
@@ -195,7 +213,7 @@ class APILoggingProvider implements LoggingProvider {
 		Filter out events that don't adhere to config settings
 	*/
 	private verifyEvent(event: GenericLogEvent): boolean {
-		const { level, source } = event;
+		const { level, context } = event;
 
 		const configLevelValue = LOG_LEVELS[this.config.level];
 		const eventLevelValue = LOG_LEVELS[level];
@@ -204,7 +222,7 @@ class APILoggingProvider implements LoggingProvider {
 			return false;
 		}
 
-		if (this.config.excludeClassList.includes(source)) {
+		if (this.config.excludeClassList.includes(context.category)) {
 			return false;
 		}
 
@@ -212,15 +230,14 @@ class APILoggingProvider implements LoggingProvider {
 	}
 
 	private async uploadEvents(): Promise<void> {
-		const eventBatch = this.generateEventBatch(this.eventBuffer);
+		const eventBatch = this.genericLogEventBatch(this.eventBuffer);
 
 		if (eventBatch.length < 1) {
 			return;
 		}
 
 		const body = {
-			logEvents: eventBatch,
-			metadata: this.config.metadata,
+			logs: eventBatch,
 		};
 
 		const options = postOptions(body);
@@ -228,11 +245,7 @@ class APILoggingProvider implements LoggingProvider {
 		await jitteredExponentialRetry(
 			async (endpoint, options) => {
 				try {
-					const res = await fetch(endpoint, options);
-					if (!res.ok)
-						throw new Error(
-							`Request Failed. Status: ${res.status} - ${res.statusText}`
-						);
+					await fetch(endpoint, options); // fetch doesnt return info for no-cors request
 				} catch (error) {
 					// fetch will only fail in the event of a network error. Don't retry
 					if (error.message === 'Failed to fetch') {
@@ -248,19 +261,6 @@ class APILoggingProvider implements LoggingProvider {
 
 		// remove events from buffer after the request succeeds
 		this.eventBuffer.splice(0, eventBatch.length);
-	}
-
-	private generateEventBatch(
-		buffer: GenericLogEvent[] | InputLogEvent[]
-	): GenericLogEvent[] | InputLogEvent[] {
-		switch (this.config.eventFormat) {
-			case EVENT_FORMAT.CLOUDWATCH:
-				return cloudWatchLogEventBatch(buffer as InputLogEvent[]);
-
-			case EVENT_FORMAT.GENERIC:
-			default:
-				return this.genericLogEventBatch(buffer as GenericLogEvent[]);
-		}
 	}
 
 	private genericLogEventBatch(buffer: GenericLogEvent[]): GenericLogEvent[] {

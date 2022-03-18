@@ -12,7 +12,7 @@
  */
 
 import { InputLogEvent } from '@aws-sdk/client-cloudwatch-logs';
-import { GenericLogEvent, LoggingProvider } from '../types';
+import { LoggerEvent, LoggingProvider } from '../types';
 import { AWS_CLOUDWATCH_CATEGORY } from '../Util/Constants';
 import { Logger } from './logger-interface';
 
@@ -84,14 +84,14 @@ export class ConsoleLogger implements Logger {
 
 	_logGlobal(type: LOG_TYPE | string, ...msg) {
 		for (const pluggable of ConsoleLogger.pluggables) {
-			const event = this._generateGenericEvent(type, msg);
-			pluggable.pushLog(event);
+			pluggable.pushLogs([this._generateLoggerEvent(type, msg)]);
 		}
 	}
 
-	_generateGenericEvent(type: LOG_TYPE | string, msg: any[]): GenericLogEvent {
+	_generateLoggerEvent(type: LOG_TYPE | string, msg: any[]): LoggerEvent {
 		let strMessage = '';
 		let data;
+		let error: LoggerEvent['loggerInfo']['error'];
 
 		if (msg.length === 1 && typeof msg[0] === 'string') {
 			strMessage = msg[0];
@@ -103,20 +103,29 @@ export class ConsoleLogger implements Logger {
 				obj = obj[0];
 			}
 			strMessage = msg[0];
+
+			if (obj instanceof Error) {
+				error = {
+					message: obj.message,
+					name: obj.name,
+				};
+			}
+
 			data = obj;
 		} else {
 			data = msg;
 		}
 
-		const event = {
-			data,
-			level: type,
+		return {
 			message: strMessage,
-			source: this.name,
 			timestamp: Date.now(),
+			loggerInfo: {
+				level: type.toLowerCase(),
+				name: this.name,
+				data,
+				error,
+			},
 		};
-
-		return event;
 	}
 	/**
 	 * Write log
