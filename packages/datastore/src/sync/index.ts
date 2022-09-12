@@ -57,8 +57,9 @@ export declare class MutationEvent {
 	public readonly model: string;
 	public readonly operation: TransformerMutationType;
 	public readonly modelId: string;
+	public readonly modelPk: (string | number | boolean)[];
 	public readonly condition: string;
-	public readonly data: string;
+	public readonly data: PersistentModel;
 	constructor(init: ModelInit<MutationEvent>);
 	static copyOf(
 		src: MutationEvent,
@@ -306,7 +307,12 @@ export class SyncEngine {
 										);
 
 										this.storage.runExclusive(storage =>
-											this.modelMerger.merge(storage, model, modelDefinition)
+											this.modelMerger.merge(
+												storage,
+												model,
+												modelDefinition,
+												modelConstructor
+											)
 										);
 
 										observer.next({

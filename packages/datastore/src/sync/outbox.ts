@@ -19,7 +19,7 @@ import { getIdentifierValue, TransformerMutationType } from './utils';
 // TODO: Persist deleted ids
 // https://github.com/aws-amplify/amplify-js/blob/datastore-docs/packages/datastore/docs/sync-engine.md#outbox
 class MutationEventOutbox {
-	private inProgressMutationEventId: string;
+	private inProgressMutationEventId?: string;
 
 	constructor(
 		private readonly schema: InternalSchema,
@@ -97,17 +97,17 @@ class MutationEventOutbox {
 	}
 
 	public async dequeue(
-		storage: StorageClass,
-		record?: PersistentModel,
-		recordOp?: TransformerMutationType
-	): Promise<MutationEvent> {
+		storage: StorageClass
+		// record?: PersistentModel,
+		// recordOp?: TransformerMutationType
+	): Promise<MutationEvent | undefined> {
 		const head = await this.peek(storage);
 
-		if (record) {
-			await this.syncOutboxVersionsOnDequeue(storage, record, head, recordOp);
-		}
+		// if (record) {
+		// 	await this.syncOutboxVersionsOnDequeue(storage, record, head, recordOp);
+		// }
 
-		await storage.delete(head);
+		if (head) await storage.delete(head);
 		this.inProgressMutationEventId = undefined;
 
 		return head;
@@ -118,7 +118,9 @@ class MutationEventOutbox {
 	 *
 	 * @param storage
 	 */
-	public async peek(storage: StorageFacade): Promise<MutationEvent> {
+	public async peek(
+		storage: StorageFacade
+	): Promise<MutationEvent | undefined> {
 		const head = await storage.queryOne(this.MutationEvent, QueryOne.FIRST);
 
 		this.inProgressMutationEventId = head ? head.id : undefined;
@@ -157,105 +159,105 @@ class MutationEventOutbox {
 		return result;
 	}
 
+	// TODO: DELETE
 	// applies _version from the AppSync mutation response to other items
 	// in the mutation queue with the same id
 	// see https://github.com/aws-amplify/amplify-js/pull/7354 for more details
-	private async syncOutboxVersionsOnDequeue(
-		storage: StorageClass,
-		record: PersistentModel,
-		head: PersistentModel,
-		recordOp: string
-	): Promise<void> {
-		if (head.operation !== recordOp) {
-			return;
-		}
+	// private async syncOutboxVersionsOnDequeue(
+	// 	storage: StorageClass,
+	// 	record: PersistentModel,
+	// 	head: PersistentModel,
+	// 	recordOp: string
+	// ): Promise<void> {
+	// 	if (head.operation !== recordOp) {
+	// 		return;
+	// 	}
 
-		const { _version, _lastChangedAt, _deleted, ..._incomingData } = record;
-		const incomingData = this.removeTimestampFields(head.model, _incomingData);
+	// 	const { _version, _lastChangedAt, _deleted, ..._incomingData } = record;
+	// 	const incomingData = this.removeTimestampFields(head.model, _incomingData);
 
-		const data = JSON.parse(head.data);
+	// 	const data = JSON.parse(head.data);
 
-		if (!data) {
-			return;
-		}
+	// 	if (!data) {
+	// 		return;
+	// 	}
 
-		const {
-			_version: __version,
-			_lastChangedAt: __lastChangedAt,
-			_deleted: __deleted,
-			..._outgoingData
-		} = data;
-		const outgoingData = this.removeTimestampFields(head.model, _outgoingData);
+	// 	const {
+	// 		_version: __version,
+	// 		_lastChangedAt: __lastChangedAt,
+	// 		_deleted: __deleted,
+	// 		..._outgoingData
+	// 	} = data;
+	// 	const outgoingData = this.removeTimestampFields(head.model, _outgoingData);
 
-		// Don't sync the version when the data in the response does not match the data
-		// in the request, i.e., when there's a handled conflict
-		if (!valuesEqual(incomingData, outgoingData, true)) {
-			return;
-		}
+	// 	// Don't sync the version when the data in the response does not match the data
+	// 	// in the request, i.e., when there's a handled conflict
+	// 	if (!valuesEqual(incomingData, outgoingData, true)) {
+	// 		return;
+	// 	}
 
-		const mutationEventModelDefinition =
-			this.schema.namespaces[SYNC].models['MutationEvent'];
+	// 	const mutationEventModelDefinition =
+	// 		this.schema.namespaces[SYNC].models['MutationEvent'];
 
-		const userModelDefinition =
-			this.schema.namespaces['user'].models[head.model];
+	// 	const userModelDefinition =
+	// 		this.schema.namespaces['user'].models[head.model];
 
-		const recordId = getIdentifierValue(userModelDefinition, record);
+	// 	const recordId = getIdentifierValue(userModelDefinition, record);
 
-		const predicate = ModelPredicateCreator.createFromExisting<MutationEvent>(
-			mutationEventModelDefinition,
-			c => c.modelId('eq', recordId).id('ne', this.inProgressMutationEventId)
-		);
+	// 	const predicate = ModelPredicateCreator.createFromExisting<MutationEvent>(
+	// 		mutationEventModelDefinition,
+	// 		c => c.modelId('eq', recordId).id('ne', this.inProgressMutationEventId)
+	// 	);
 
-		const outdatedMutations = await storage.query(
-			this.MutationEvent,
-			predicate
-		);
+	// 	const outdatedMutations = await storage.query(
+	// 		this.MutationEvent,
+	// 		predicate
+	// 	);
 
-		if (!outdatedMutations.length) {
-			return;
-		}
+	// 	if (!outdatedMutations.length) {
+	// 		return;
+	// 	}
 
-		const reconciledMutations = outdatedMutations.map(m => {
-			const oldData = JSON.parse(m.data);
+	// 	const reconciledMutations = outdatedMutations.map(m => {
+	// 		const oldData = JSON.parse(m.data);
 
-			const newData = { ...oldData, _version, _lastChangedAt };
+	// 		const newData = { ...oldData, _version, _lastChangedAt };
 
-			return this.MutationEvent.copyOf(m, draft => {
-				draft.data = JSON.stringify(newData);
-			});
-		});
+	// 		return this.MutationEvent.copyOf(m, draft => {
+	// 			draft.data = JSON.stringify(newData);
+	// 		});
+	// 	});
 
-		await storage.delete(this.MutationEvent, predicate);
+	// 	await storage.delete(this.MutationEvent, predicate);
 
-		await Promise.all(
-			reconciledMutations.map(
-				async m => await storage.save(m, undefined, this.ownSymbol)
-			)
-		);
-	}
+	// 	await Promise.all(
+	// 		reconciledMutations.map(
+	// 			async m => await storage.save(m, undefined, this.ownSymbol)
+	// 		)
+	// 	);
+	// }
 
 	private mergeUserFields(
 		previous: MutationEvent,
 		current: MutationEvent
 	): MutationEvent {
-		const { _version, _lastChangedAt, _deleted, ...previousData } = JSON.parse(
-			previous.data
-		);
+		const { _version, _lastChangedAt, _deleted, ...previousData } =
+			previous.data;
 
 		const {
 			_version: __version,
 			_lastChangedAt: __lastChangedAt,
 			_deleted: __deleted,
 			...currentData
-		} = JSON.parse(current.data);
+		} = current.data;
 
-		const data = JSON.stringify({
+		const data = {
 			_version,
 			_lastChangedAt,
 			_deleted,
 			...previousData,
 			...currentData,
-		});
+		};
 
 		return this.modelInstanceCreator(this.MutationEvent, {
 			...current,
@@ -280,6 +282,7 @@ class MutationEventOutbox {
     }
 	]
 	*/
+	/* 
 	private removeTimestampFields(
 		model: string,
 		record: PersistentModel
@@ -305,6 +308,7 @@ class MutationEventOutbox {
 
 		return record;
 	}
+	*/
 }
 
 export { MutationEventOutbox };
