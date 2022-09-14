@@ -159,7 +159,7 @@ class MutationProcessor {
 
 				const operationAuthModes = modelAuthModes[operation.toUpperCase()];
 
-				const modelDefinition = this.schema.namespaces['user'].models[model];
+				const _modelDefinition = this.schema.namespaces['user'].models[model];
 
 				// stringify nested objects of type AWSJSON
 				// this allows us to return parsed JSON to users (see `castInstanceType()` in datastore.ts),
@@ -169,8 +169,8 @@ class MutationProcessor {
 						k &&
 						v !== null &&
 						typeof v === 'object' &&
-						modelDefinition.fields[k] &&
-						modelDefinition.fields[k].type === 'AWSJSON';
+						_modelDefinition.fields[k] &&
+						_modelDefinition.fields[k].type === 'AWSJSON';
 
 					if (isAWSJSON) {
 						return JSON.stringify(v);
@@ -178,17 +178,17 @@ class MutationProcessor {
 					return v;
 				};
 
-				await this.storage.runExclusive(async storage => {
+				const v = await this.storage.runExclusive(async storage => {
 					const predicate = ModelPredicateCreator.createForPk<any>(
-						modelDefinition,
+						_modelDefinition,
 						modelPk
 					);
 
 					const [fromDB] = await storage.query(modelConstructor, predicate);
-					(data as any)._version = fromDB._version;
+					return fromDB._version;
 				});
 
-				const modelData = JSON.stringify(data, replacer);
+				const modelData = JSON.stringify({ ...data, _version: v }, replacer);
 
 				let authModeAttempts = 0;
 				const authModeRetry = async () => {

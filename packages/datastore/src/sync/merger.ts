@@ -25,8 +25,7 @@ class ModelMerger {
 		model: T,
 		modelDefinition: SchemaModel,
 		modelConstructor: PersistentModelConstructor<T>
-		// TODO: expand promise type to include no-op / null
-	): Promise<OpType> {
+	): Promise<OpType | undefined> {
 		let result: OpType;
 		const mutationsForModel = await this.outbox.getForModel(
 			storage,
@@ -35,30 +34,6 @@ class ModelMerger {
 		);
 
 		const isDelete = model._deleted;
-
-		// TODO - safe to delete?
-		// if (mutationsForModel.length === 0) {
-		// 	if (isDelete) {
-		// 		result = OpType.DELETE;
-		// 		await storage.delete(model, undefined, this.ownSymbol);
-		// 	} else {
-		// 		[[, result]] = await storage.save(model, undefined, this.ownSymbol);
-		// 	}
-		// }
-
-		// TODO - extract
-		/* 
-		Spec:
-		FOREACH Response in Network Response
-			GET local Model M WHERE identifier == Response[identifier]
-			IF Response[_version] > M[_version] THEN
-				WRITE Response to Storage Adapter  ## Persist latest data locally
-			ELSE
-				CONTINUE ## Discard Response
-			END
-		END
-		*/
-
 		const modelPkFields = extractPrimaryKeyFieldNames(modelDefinition);
 		const identifierObject = extractPrimaryKeysAndValues(model, modelPkFields);
 		const predicate = ModelPredicateCreator.createForPk<T>(
@@ -68,20 +43,32 @@ class ModelMerger {
 
 		const [fromDB] = await storage.query(modelConstructor, predicate);
 
-		if (fromDB === undefined) {
-			return result;
-		}
-
-		if (fromDB._version === undefined || fromDB._version < model._version) {
+		if (
+			!fromDB ||
+			fromDB._version === undefined ||
+			fromDB._version < model._version
+		) {
 			if (isDelete) {
 				result = OpType.DELETE;
 				await storage.delete(model, undefined, this.ownSymbol);
+				return result;
 			} else {
-				[[, result]] = await storage.save(model, undefined, this.ownSymbol);
+				if (mutationsForModel.length === 0) {
+					[[, result]] = await storage.save(model, undefined, this.ownSymbol);
+					return result;
+				} else {
+					await storage.save(
+						modelConstructor.copyOf(fromDB, updated => {
+							(updated as any)._version = model._version;
+						}),
+						undefined,
+						this.ownSymbol
+					);
+				}
 			}
 		}
 
-		return result;
+		return undefined;
 	}
 
 	public async mergePage(

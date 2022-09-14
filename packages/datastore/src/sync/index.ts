@@ -349,7 +349,12 @@ export class SyncEngine {
 											);
 
 											this.storage.runExclusive(storage =>
-												this.modelMerger.merge(storage, model, modelDefinition)
+												this.modelMerger.merge(
+													storage,
+													model,
+													modelDefinition,
+													modelConstructor
+												)
 											);
 										}
 									)
@@ -572,7 +577,8 @@ export class SyncEngine {
 											const opType = await this.modelMerger.merge(
 												storage,
 												item,
-												modelDefinition
+												modelDefinition,
+												modelConstructor
 											);
 
 											if (opType !== undefined) {
@@ -877,12 +883,12 @@ export class SyncEngine {
 							isRequired: true,
 							isArray: false,
 						},
-						data: {
-							name: 'data',
-							type: 'String',
-							isRequired: true,
-							isArray: false,
-						},
+						// data: {
+						// 	name: 'data',
+						// 	type: 'String',
+						// 	isRequired: true,
+						// 	isArray: false,
+						// },
 						modelId: {
 							name: 'modelId',
 							type: 'String',
