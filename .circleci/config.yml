@@ -333,12 +333,11 @@ jobs:
     steps:
       - checkout
       - run:
-          name: yarn install --non-interactive
+          name: yarn bootstrap
           # temporarily rename .yarnrc before installing so that we can generate a yarn.lock artifact
           command: |
             mv .yarnrc ._yarnrc
-            yarn
-      - run: yarn bootstrap
+            yarn bootstrap -- --non-interactive
       - run: yarn build
       # storing yarn.lock as an artifact, so that we can quickly get a dependency diff
       # with the last working build in the event that some upstream deps break the build in the future
