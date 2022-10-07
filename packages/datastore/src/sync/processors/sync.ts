@@ -238,79 +238,57 @@ class SyncProcessor {
 						throw new NonRetryableError(clientOrForbiddenErrorMessage);
 					}
 
-					const hasItems = Boolean(
-						error &&
-							error.data &&
-							error.data[opName] &&
-							error.data[opName].items
-					);
-					if (this.partialDataFeatureFlagEnabled()) {
-						if (hasItems) {
-							const result = error;
-							result.data[opName].items = result.data[opName].items.filter(
-								item => item !== null
+					const hasItems = Boolean(error?.data[opName]?.items);
+
+					if (hasItems) {
+						const result = error;
+						result.data[opName].items = result.data[opName].items.filter(
+							item => item !== null
+						);
+
+						if (error.errors) {
+							const unauthorized = (error.errors as [any]).some(
+								err => err.errorType === 'Unauthorized'
 							);
-							if (error.errors) {
-								await Promise.all(
-									error.errors.map(async err => {
-										try {
-											await this.errorHandler({
-												recoverySuggestion:
-													'Ensure app code is up to date, auth directives exist and are correct on each model, and that server-side data has not been invalidated by a schema change. If the problem persists, search for or create an issue: https://github.com/aws-amplify/amplify-js/issues',
-												localModel: null,
-												message: err.message,
-												model: modelDefinition.name,
-												operation: opName,
-												errorType: getSyncErrorType(err),
-												process: ProcessName.sync,
-												remoteModel: null,
-												cause: err,
-											});
-										} catch (e) {
-											logger.error('Sync error handler failed with:', e);
-										}
-									})
+
+							if (unauthorized) {
+								logger.warn(
+									'queryError',
+									`User is unauthorized to query ${opName}, some items could not be returned.`
 								);
-								Hub.dispatch('datastore', {
-									event: 'syncQueriesPartialSyncError',
-									data: {
-										errors: error.errors,
-										modelName: modelDefinition.name,
-									},
-								});
 							}
 
-							return result;
-						} else {
-							throw error;
-						}
-					}
-
-					// If the error is unauthorized, filter out unauthorized items and return accessible items
-					const unauthorized =
-						error &&
-						error.errors &&
-						(error.errors as [any]).some(
-							err => err.errorType === 'Unauthorized'
-						);
-					if (unauthorized) {
-						const result = error;
-
-						if (hasItems) {
-							result.data[opName].items = result.data[opName].items.filter(
-								item => item !== null
+							await Promise.all(
+								error.errors.map(async err => {
+									if (err.errorType === 'Unauthorized') {
+										return;
+									}
+									try {
+										await this.errorHandler({
+											recoverySuggestion:
+												'Ensure app code is up to date, auth directives exist and are correct on each model, and that server-side data has not been invalidated by a schema change. If the problem persists, search for or create an issue: https://github.com/aws-amplify/amplify-js/issues',
+											localModel: null,
+											message: err.message,
+											model: modelDefinition.name,
+											operation: opName,
+											errorType: getSyncErrorType(err),
+											process: ProcessName.sync,
+											remoteModel: null,
+											cause: err,
+										});
+									} catch (e) {
+										logger.error('Sync error handler failed with:', e);
+									}
+								})
 							);
-						} else {
-							result.data[opName] = {
-								...opResultDefaults,
-								...result.data[opName],
-							};
+							Hub.dispatch('datastore', {
+								event: 'syncQueriesNonApplicableDataReceived',
+								data: {
+									errors: error.errors,
+									modelName: modelDefinition.name,
+								},
+							});
 						}
-						logger.warn(
-							'queryError',
-							`User is unauthorized to query ${opName}, some items could not be returned.`
-						);
-						return result;
 					} else {
 						throw error;
 					}
