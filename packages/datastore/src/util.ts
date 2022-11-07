@@ -297,82 +297,70 @@ let safariCompatabilityModeResult;
  * this will *always* return `undefined`. So, the index needs to be created as a scalar.
  */
 export const isSafariCompatabilityMode: () => Promise<boolean> = async () => {
-	try {
-		const dbName = uuid();
-		const storeName = 'indexedDBFeatureProbeStore';
-		const indexName = 'idx';
+	if (indexedDB === null) return false;
 
-		if (indexedDB === null) return false;
-
-		if (safariCompatabilityModeResult !== undefined) {
-			return safariCompatabilityModeResult;
-		}
-
-		const db: IDBDatabase | false = await new Promise(resolve => {
-			const dbOpenRequest = indexedDB.open(dbName);
-			dbOpenRequest.onerror = () => resolve(false);
-
-			dbOpenRequest.onsuccess = () => {
-				const db = dbOpenRequest.result;
-				resolve(db);
-			};
-
-			dbOpenRequest.onupgradeneeded = (event: any) => {
-				const db = event?.target?.result;
-
-				db.onerror = () => resolve(false);
-
-				const store = db.createObjectStore(storeName, {
-					autoIncrement: true,
-				});
-
-				store.createIndex(indexName, ['id']);
-			};
-		});
-
-		if (!db) {
-			throw new Error('Could not open probe DB');
-		}
-
-		const rwTx = db.transaction(storeName, 'readwrite');
-		const rwStore = rwTx.objectStore(storeName);
-		rwStore.add({
-			id: 1,
-		});
-
-		(rwTx as any).commit();
-
-		const result = await new Promise(resolve => {
-			const tx = db.transaction(storeName, 'readonly');
-			const store = tx.objectStore(storeName);
-			const index = store.index(indexName);
-
-			const getRequest = index.get([1]);
-
-			getRequest.onerror = () => resolve(false);
-
-			getRequest.onsuccess = (event: any) => {
-				resolve(event?.target?.result);
-			};
-		});
-
-		if (db && typeof db.close === 'function') {
-			await db.close();
-		}
-
-		await indexedDB.deleteDatabase(dbName);
-
-		if (result === undefined) {
-			safariCompatabilityModeResult = true;
-		} else {
-			safariCompatabilityModeResult = false;
-		}
-	} catch (error) {
-		safariCompatabilityModeResult = false;
+	if (safariCompatabilityModeResult !== undefined) {
+		return safariCompatabilityModeResult;
 	}
 
-	return safariCompatabilityModeResult;
+	return checkIndexKeyNonCompliance()
+		.then(res => {
+			safariCompatabilityModeResult = res;
+			return safariCompatabilityModeResult;
+		})
+		.catch(() => {
+			safariCompatabilityModeResult = false;
+			return safariCompatabilityModeResult;
+		});
 };
+
+/**
+ * @returns `true` if the generated key is _not_ compliant; `false` if it is compliant
+ */
+function checkIndexKeyNonCompliance(): Promise<boolean> {
+	const dbName = uuid();
+	const storeName = 'indexedDBFeatureProbeStore';
+	const indexName = 'idx';
+
+	return new Promise((resolve, reject) => {
+		const dbOpenRequest = indexedDB.open(dbName);
+		dbOpenRequest.onerror = reject;
+
+		dbOpenRequest.onupgradeneeded = (event: any) => {
+			const db = event?.target?.result;
+
+			const store = db.createObjectStore(storeName, {
+				autoIncrement: true,
+			});
+
+			store.createIndex(indexName, ['id']);
+			store.add({
+				id: 1,
+			});
+		};
+
+		dbOpenRequest.onsuccess = () => {
+			const db = dbOpenRequest.result;
+			const cursorReq = db
+				.transaction(storeName, 'readonly')
+				.objectStore(storeName)
+				.index(indexName)
+				.openCursor();
+
+			cursorReq.onerror = reject;
+
+			cursorReq.onsuccess = (e: any) => {
+				const keyValue = e.target.result.key.valueOf();
+
+				db.close();
+				indexedDB.deleteDatabase(dbName);
+
+				const keyNotCompliant = !Array.isArray(keyValue);
+				resolve(keyNotCompliant);
+			};
+		};
+	});
+}
 
 const randomBytes = (nBytes: number): Buffer => {
 	return Buffer.from(new WordArray().random(nBytes).toString(), 'hex');
